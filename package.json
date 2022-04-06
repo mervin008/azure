@@ -1,0 +1,20 @@
+{
+  "name": "demo_web_app",
+  "version": "1.0.0",
+  "description": "Node.js web app",
+  "author": "Syed Sohaib Uddin",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/syed-sohaib7/azure-deployment-demo.git"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "files": [
+    "*"
+  ],
+  "dependencies": {
+    "express": "^4.16.1"
+  }
+}
