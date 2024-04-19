@@ -1,68 +1,113 @@
-import time
-from google.cloud import monitoring_v3
-
-project_id = "your-gcp-project-id"  # Replace with your project ID
-client = monitoring_v3.MetricServiceClient()
-project_name = client.common_project_path(project_id)
-
-# Metric definitions
-total_requests_metric = monitoring_v3.MetricDescriptor()
-total_requests_metric.type = "custom.googleapis.com/certhub_email_requests_total"
-total_requests_metric.metric_kind = monitoring_v3.MetricDescriptor.MetricKind.CUMULATIVE
-total_requests_metric.value_type = monitoring_v3.MetricDescriptor.ValueType.INT64
-
-user_emails_metric = monitoring_v3.MetricDescriptor()
-user_emails_metric.type = "custom.googleapis.com/certhub_user_emails_total"
-user_emails_metric.metric_kind = monitoring_v3.MetricDescriptor.MetricKind.CUMULATIVE
-user_emails_metric.value_type = monitoring_v3.MetricDescriptor.ValueType.INT64
-
-team_emails_metric = monitoring_v3.MetricDescriptor()
-team_emails_metric.type = "custom.googleapis.com/certhub_team_emails_total"
-team_emails_metric.metric_kind = monitoring_v3.MetricDescriptor.MetricKind.CUMULATIVE
-team_emails_metric.value_type = monitoring_v3.MetricDescriptor.ValueType.INT64
-
-combined_failures_metric = monitoring_v3.MetricDescriptor()
-combined_failures_metric.type = "custom.googleapis.com/certhub_failures_total"
-combined_failures_metric.metric_kind = monitoring_v3.MetricDescriptor.MetricKind.CUMULATIVE
-combined_failures_metric.value_type = monitoring_v3.MetricDescriptor.ValueType.INT64
-
-template_metrics = {}  
-
-def create_metric_descriptor(metric_type):
-    descriptor = monitoring_v3.MetricDescriptor()
-    descriptor.type = metric_type
-    descriptor.metric_kind = monitoring_v3.MetricDescriptor.MetricKind.CUMULATIVE
-    descriptor.value_type = monitoring_v3.MetricDescriptor.ValueType.INT64
-    return descriptor
-
-def report_metric(metric_descriptor, value):     
-    metric = monitoring_v3.types.Metric()
-    metric.type = metric_descriptor.type
-    resource = monitoring_v3.types.MonitoredResource(type='global') 
-
-    point = monitoring_v3.types.Point()
-    point.interval.end_time.seconds = int(time.time())
-    point.value.int64_value = value
-    metric.points.append(point)
-
-    timeseries = monitoring_v3.types.TimeSeries()
-    timeseries.metric = metric
-    timeseries.resource = resource
-    client.create_time_series(name=project_name, time_series=[timeseries])
-
-def track_user_email(template_name):
-    report_metric(user_emails_metric, 1) 
-    track_template_usage(template_name)
-
-def track_team_email(template_name):
-    report_metric(team_emails_metric, 1) 
-    track_template_usage(template_name)
-
-def track_template_usage(template_name):
-    if template_name not in template_metrics:
-        metric_type = f"custom.googleapis.com/certhub_template_{template_name}_sent"
-        template_metrics[template_name] = create_metric_descriptor(metric_type)  
-    report_metric(template_metrics[template_name], 1) 
-
-def report_failure(): 
-    report_metric(combined_failures_metric, 1)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: certhub-notification-api
+  namespace: notify-app
+spec:
+  replicas: 1 # Adjust as needed
+  selector:
+    matchLabels:
+      app: certhub-notification-api
+  template:
+    metadata:
+      labels:
+        app: certhub-notification-api
+    spec:
+      imagePullSecrets:
+        - name: regcred 
+      containers:
+        - name: certhub-notification-api
+          image: certhub-notification-api:latest  # Replace with your image
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: secret-volume
+              mountPath: /etc/secret
+              readOnly: true
+      volumes:
+        - name: secret-volume
+          secret:
+            secretName: api-key
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: certhub-notification-api-service
+  namespace: notify-app
+spec:
+  selector:
+    app: certhub-notification-api
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: certhub-notification-api-gateway
+  namespace: notify-app
+spec:
+  selector:
+    istio: ingressgateway # Assumes your ingress gateway has this label
+  servers:
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE 
+        credentialName: tls-keys 
+      hosts:
+        - api.email.at.com
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: certhub-notification-api-virtualservice
+  namespace: notify-app
+spec:
+  hosts:
+    - api.email.at.com
+  gateways:
+    - certhub-notification-api-gateway
+  http:
+    - match:
+      - uri:
+          prefix: /
+      route:
+        - destination:
+            host: certhub-notification-api-service
+            port:
+              number: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: certhub-notification-api
+  namespace: notify-app
+spec:
+  replicas: 1 
+  selector:
+    matchLabels:
+      app: certhub-notification-api
+  template:
+    metadata:
+      labels:
+        app: certhub-notification-api
+    spec:
+      imagePullSecrets:
+        - name: regcred 
+      containers:
+        - name: certhub-notification-api
+          image: certhub-notification-api:latest
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: secret-volume
+              mountPath: /etc/secret # Mount the secret here
+              readOnly: true 
+      volumes:
+        - name: secret-volume
+          secret:
+            secretName: api-key  # Your secret name
